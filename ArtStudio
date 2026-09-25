@@ -1,0 +1,647 @@
+-- ART STUDIO - Creator Store Explorer (Multi-Category Fix + Black & Red Theme)
+local CoreGui = game:GetService("CoreGui")
+local UserInputService = game:GetService("UserInputService")
+local InsertService = game:GetService("InsertService")
+local MarketplaceService = game:GetService("MarketplaceService")
+local HttpService = game:GetService("HttpService")
+local SoundService = game:GetService("SoundService")
+local TweenService = game:GetService("TweenService")
+
+-- Cleanup duplicate UI instances
+if CoreGui:FindFirstChild("ArtStudioUI_Red") then
+    CoreGui.ArtStudioUI_Red:Destroy()
+end
+
+-- Global State
+local currentAudio = nil
+local selectedAssetId = nil
+local selectedCategory = "ALL" -- Options: "ALL", "Models", "Decals", "Audio"
+
+-- ScreenGui Setup
+local ScreenGui = Instance.new("ScreenGui")
+ScreenGui.Name = "ArtStudioUI_Red"
+ScreenGui.ResetOnSpawn = false
+ScreenGui.Parent = CoreGui
+
+----------------------------------------------------
+-- DRAG SYSTEM (Desktop & Mobile Touch Support)
+----------------------------------------------------
+local function makeDraggable(frame, dragHandle)
+    dragHandle = dragHandle or frame
+    local dragging, dragInput, dragStart, startPos
+
+    local function update(input)
+        local delta = input.Position - dragStart
+        frame.Position = UDim2.new(
+            startPos.X.Scale, startPos.X.Offset + delta.X,
+            startPos.Y.Scale, startPos.Y.Offset + delta.Y
+        )
+    end
+
+    dragHandle.InputBegan:Connect(function(input)
+        if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
+            dragging = true
+            dragStart = input.Position
+            startPos = frame.Position
+
+            input.Changed:Connect(function()
+                if input.UserInputState == Enum.UserInputState.End then
+                    dragging = false
+                end
+            end)
+        end
+    end)
+
+    dragHandle.InputChanged:Connect(function(input)
+        if input.UserInputType == Enum.UserInputType.MouseMovement or input.UserInputType == Enum.UserInputType.Touch then
+            dragInput = input
+        end
+    end)
+
+    UserInputService.InputChanged:Connect(function(input)
+        if input == dragInput and dragging then
+            update(input)
+        end
+    end)
+end
+
+----------------------------------------------------
+-- 1. FLOATING CIRCLE TOGGLE BUTTON (🧰)
+----------------------------------------------------
+local ToggleBtn = Instance.new("TextButton")
+ToggleBtn.Name = "ToggleButton"
+ToggleBtn.Size = UDim2.new(0, 48, 0, 48)
+ToggleBtn.Position = UDim2.new(0.04, 0, 0.4, 0)
+ToggleBtn.BackgroundColor3 = Color3.fromRGB(200, 20, 30)
+ToggleBtn.BorderSizePixel = 0
+ToggleBtn.Text = "🧰"
+ToggleBtn.TextSize = 22
+ToggleBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
+ToggleBtn.AutoButtonColor = false
+ToggleBtn.Active = true
+ToggleBtn.ZIndex = 100
+ToggleBtn.Parent = ScreenGui
+
+local ToggleCorner = Instance.new("UICorner")
+ToggleCorner.CornerRadius = UDim.new(1, 0)
+ToggleCorner.Parent = ToggleBtn
+
+local ToggleStroke = Instance.new("UIStroke")
+ToggleStroke.Color = Color3.fromRGB(255, 60, 70)
+ToggleStroke.Thickness = 2
+ToggleStroke.Parent = ToggleBtn
+
+makeDraggable(ToggleBtn)
+
+----------------------------------------------------
+-- 2. MAIN FRAME (Black & Red Theme)
+----------------------------------------------------
+local MainFrame = Instance.new("Frame")
+MainFrame.Name = "MainFrame"
+MainFrame.Size = UDim2.new(0, 480, 0, 440)
+MainFrame.Position = UDim2.new(0.5, -240, 0.5, -220)
+MainFrame.BackgroundColor3 = Color3.fromRGB(14, 14, 18)
+MainFrame.BorderSizePixel = 0
+MainFrame.ClipsDescendants = true
+MainFrame.Visible = false
+MainFrame.Active = true
+MainFrame.Parent = ScreenGui
+
+local MainCorner = Instance.new("UICorner")
+MainCorner.CornerRadius = UDim.new(0, 10)
+MainCorner.Parent = MainFrame
+
+local MainStroke = Instance.new("UIStroke")
+MainStroke.Color = Color3.fromRGB(190, 25, 35)
+MainStroke.Thickness = 1.5
+MainStroke.Parent = MainFrame
+
+-- Title Bar Header
+local TitleBar = Instance.new("Frame")
+TitleBar.Name = "TitleBar"
+TitleBar.Size = UDim2.new(1, 0, 0, 42)
+TitleBar.BackgroundColor3 = Color3.fromRGB(22, 18, 22)
+TitleBar.BorderSizePixel = 0
+TitleBar.Parent = MainFrame
+
+local TitleText = Instance.new("TextLabel")
+TitleText.Size = UDim2.new(1, -120, 0, 22)
+TitleText.Position = UDim2.new(0, 12, 0, 4)
+TitleText.BackgroundTransparency = 1
+TitleText.Text = "ART STUDIO"
+TitleText.TextColor3 = Color3.fromRGB(235, 45, 55)
+TitleText.TextSize = 15
+TitleText.Font = Enum.Font.GothamBold
+TitleText.TextXAlignment = Enum.TextXAlignment.Left
+TitleText.Parent = TitleBar
+
+local Subtext = Instance.new("TextLabel")
+Subtext.Size = UDim2.new(1, -120, 0, 14)
+Subtext.Position = UDim2.new(0, 12, 0, 24)
+Subtext.BackgroundTransparency = 1
+Subtext.Text = "by Artemesis"
+Subtext.TextColor3 = Color3.fromRGB(150, 150, 160)
+Subtext.TextSize = 10
+Subtext.Font = Enum.Font.Gotham
+Subtext.TextXAlignment = Enum.TextXAlignment.Left
+Subtext.Parent = TitleBar
+
+makeDraggable(MainFrame, TitleBar)
+
+-- Close Button
+local CloseBtn = Instance.new("TextButton")
+CloseBtn.Size = UDim2.new(0, 26, 0, 26)
+CloseBtn.Position = UDim2.new(1, -32, 0, 8)
+CloseBtn.BackgroundColor3 = Color3.fromRGB(180, 20, 30)
+CloseBtn.Text = "✕"
+CloseBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
+CloseBtn.Font = Enum.Font.GothamBold
+CloseBtn.TextSize = 12
+CloseBtn.Parent = TitleBar
+
+local CloseCorner = Instance.new("UICorner")
+CloseCorner.CornerRadius = UDim.new(0, 6)
+CloseCorner.Parent = CloseBtn
+
+----------------------------------------------------
+-- 3. RESIZE CONTROLS (+ / -)
+----------------------------------------------------
+local ResizeFrame = Instance.new("Frame")
+ResizeFrame.Size = UDim2.new(0, 58, 0, 26)
+ResizeFrame.Position = UDim2.new(1, -94, 0, 8)
+ResizeFrame.BackgroundTransparency = 1
+ResizeFrame.Parent = TitleBar
+
+local PlusSizeBtn = Instance.new("TextButton")
+PlusSizeBtn.Size = UDim2.new(0, 26, 0, 26)
+PlusSizeBtn.Position = UDim2.new(0, 30, 0, 0)
+PlusSizeBtn.BackgroundColor3 = Color3.fromRGB(35, 35, 42)
+PlusSizeBtn.Text = "+"
+PlusSizeBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
+PlusSizeBtn.Font = Enum.Font.GothamBold
+PlusSizeBtn.TextSize = 14
+PlusSizeBtn.Parent = ResizeFrame
+
+local MinusSizeBtn = Instance.new("TextButton")
+MinusSizeBtn.Size = UDim2.new(0, 26, 0, 26)
+MinusSizeBtn.Position = UDim2.new(0, 0, 0, 0)
+MinusSizeBtn.BackgroundColor3 = Color3.fromRGB(35, 35, 42)
+MinusSizeBtn.Text = "-"
+MinusSizeBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
+MinusSizeBtn.Font = Enum.Font.GothamBold
+MinusSizeBtn.TextSize = 14
+MinusSizeBtn.Parent = ResizeFrame
+
+Instance.new("UICorner", PlusSizeBtn).CornerRadius = UDim.new(0, 6)
+Instance.new("UICorner", MinusSizeBtn).CornerRadius = UDim.new(0, 6)
+
+PlusSizeBtn.MouseButton1Click:Connect(function()
+    local newW = math.clamp(MainFrame.Size.X.Offset + 40, 420, 800)
+    local newH = math.clamp(MainFrame.Size.Y.Offset + 30, 340, 650)
+    MainFrame.Size = UDim2.new(0, newW, 0, newH)
+end)
+
+MinusSizeBtn.MouseButton1Click:Connect(function()
+    local newW = math.clamp(MainFrame.Size.X.Offset - 40, 420, 800)
+    local newH = math.clamp(MainFrame.Size.Y.Offset - 30, 340, 650)
+    MainFrame.Size = UDim2.new(0, newW, 0, newH)
+end)
+
+----------------------------------------------------
+-- 4. SEARCH BAR & CATEGORY FILTERS
+----------------------------------------------------
+local SearchBox = Instance.new("TextBox")
+SearchBox.Size = UDim2.new(1, -115, 0, 30)
+SearchBox.Position = UDim2.new(0, 10, 0, 48)
+SearchBox.BackgroundColor3 = Color3.fromRGB(22, 22, 26)
+SearchBox.TextColor3 = Color3.fromRGB(255, 255, 255)
+SearchBox.PlaceholderText = "Search Creator Store..."
+SearchBox.PlaceholderColor3 = Color3.fromRGB(120, 120, 130)
+SearchBox.Font = Enum.Font.Gotham
+SearchBox.TextSize = 12
+SearchBox.Text = ""
+SearchBox.Parent = MainFrame
+
+Instance.new("UICorner", SearchBox).CornerRadius = UDim.new(0, 6)
+local SearchStroke = Instance.new("UIStroke")
+SearchStroke.Color = Color3.fromRGB(45, 38, 42)
+SearchStroke.Thickness = 1
+SearchStroke.Parent = SearchBox
+
+local SearchBtn = Instance.new("TextButton")
+SearchBtn.Size = UDim2.new(0, 88, 0, 30)
+SearchBtn.Position = UDim2.new(1, -98, 0, 48)
+SearchBtn.BackgroundColor3 = Color3.fromRGB(180, 20, 30)
+SearchBtn.Text = "Search"
+SearchBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
+SearchBtn.Font = Enum.Font.GothamBold
+SearchBtn.TextSize = 12
+SearchBtn.Parent = MainFrame
+
+Instance.new("UICorner", SearchBtn).CornerRadius = UDim.new(0, 6)
+
+-- Category Filter Buttons Frame
+local CategoryFrame = Instance.new("Frame")
+CategoryFrame.Size = UDim2.new(1, -20, 0, 26)
+CategoryFrame.Position = UDim2.new(0, 10, 0, 84)
+CategoryFrame.BackgroundTransparency = 1
+CategoryFrame.Parent = MainFrame
+
+local CategoryLayout = Instance.new("UIListLayout")
+CategoryLayout.FillDirection = Enum.FillDirection.Horizontal
+CategoryLayout.Padding = UDim.new(0, 6)
+CategoryLayout.Parent = CategoryFrame
+
+local categoryBtns = {}
+local categories = {
+    {Name = "ALL", Label = "All"},
+    {Name = "Models", Label = "📦 Models"},
+    {Name = "Decals", Label = "🖼️ Decals"},
+    {Name = "Audio", Label = "🔊 Audio"}
+}
+
+local function setCategory(catName)
+    selectedCategory = catName
+    for name, btn in pairs(categoryBtns) do
+        if name == catName then
+            btn.BackgroundColor3 = Color3.fromRGB(180, 20, 30)
+            btn.TextColor3 = Color3.fromRGB(255, 255, 255)
+        else
+            btn.BackgroundColor3 = Color3.fromRGB(25, 25, 32)
+            btn.TextColor3 = Color3.fromRGB(160, 160, 170)
+        end
+    end
+end
+
+for _, cat in ipairs(categories) do
+    local btn = Instance.new("TextButton")
+    btn.Size = UDim2.new(0, 80, 1, 0)
+    btn.BackgroundColor3 = Color3.fromRGB(25, 25, 32)
+    btn.Text = cat.Label
+    btn.TextColor3 = Color3.fromRGB(160, 160, 170)
+    btn.Font = Enum.Font.GothamBold
+    btn.TextSize = 10
+    btn.Parent = CategoryFrame
+    
+    Instance.new("UICorner", btn).CornerRadius = UDim.new(0, 4)
+    categoryBtns[cat.Name] = btn
+
+    btn.MouseButton1Click:Connect(function()
+        setCategory(cat.Name)
+    end)
+end
+
+setCategory("ALL")
+
+----------------------------------------------------
+-- 5. GRID RESULTS CONTAINER
+----------------------------------------------------
+local ScrollFrame = Instance.new("ScrollingFrame")
+ScrollFrame.Size = UDim2.new(1, -20, 1, -248)
+ScrollFrame.Position = UDim2.new(0, 10, 0, 116)
+ScrollFrame.BackgroundTransparency = 1
+ScrollFrame.BorderSizePixel = 0
+ScrollFrame.ScrollBarThickness = 4
+ScrollFrame.ScrollBarImageColor3 = Color3.fromRGB(180, 20, 30)
+ScrollFrame.Parent = MainFrame
+
+local UIGridLayout = Instance.new("UIGridLayout")
+UIGridLayout.CellSize = UDim2.new(0, 100, 0, 100)
+UIGridLayout.CellPadding = UDim2.new(0, 8, 0, 8)
+UIGridLayout.Parent = ScrollFrame
+
+UIGridLayout:GetPropertyChangedSignal("AbsoluteContentSize"):Connect(function()
+    ScrollFrame.CanvasSize = UDim2.new(0, 0, 0, UIGridLayout.AbsoluteContentSize.Y + 10)
+end)
+
+----------------------------------------------------
+-- 6. INSPECTION / DETAIL WINDOW (BOTTOM PANEL)
+----------------------------------------------------
+local DetailPanel = Instance.new("Frame")
+DetailPanel.Name = "DetailPanel"
+DetailPanel.Size = UDim2.new(1, -20, 0, 115)
+DetailPanel.Position = UDim2.new(0, 10, 1, -125)
+DetailPanel.BackgroundColor3 = Color3.fromRGB(20, 18, 22)
+DetailPanel.BorderSizePixel = 0
+DetailPanel.Parent = MainFrame
+
+Instance.new("UICorner", DetailPanel).CornerRadius = UDim.new(0, 8)
+local DetailStroke = Instance.new("UIStroke")
+DetailStroke.Color = Color3.fromRGB(180, 25, 35)
+DetailStroke.Thickness = 1
+DetailStroke.Parent = DetailPanel
+
+-- Image Preview
+local DetailThumb = Instance.new("ImageLabel")
+DetailThumb.Size = UDim2.new(0, 95, 0, 95)
+DetailThumb.Position = UDim2.new(0, 10, 0, 10)
+DetailThumb.BackgroundColor3 = Color3.fromRGB(10, 10, 12)
+DetailThumb.Image = ""
+DetailThumb.ScaleType = Enum.ScaleType.Fit
+DetailThumb.Parent = DetailPanel
+
+Instance.new("UICorner", DetailThumb).CornerRadius = UDim.new(0, 6)
+
+-- Info Labels
+local InfoName = Instance.new("TextLabel")
+InfoName.Size = UDim2.new(1, -120, 0, 20)
+InfoName.Position = UDim2.new(0, 115, 0, 8)
+InfoName.BackgroundTransparency = 1
+InfoName.Text = "Select an asset to inspect"
+InfoName.TextColor3 = Color3.fromRGB(255, 255, 255)
+InfoName.Font = Enum.Font.GothamBold
+InfoName.TextSize = 12
+InfoName.TextXAlignment = Enum.TextXAlignment.Left
+InfoName.TextTruncate = Enum.TextTruncate.AtEnd
+InfoName.Parent = DetailPanel
+
+local InfoDetails = Instance.new("TextLabel")
+InfoDetails.Size = UDim2.new(1, -120, 0, 48)
+InfoDetails.Position = UDim2.new(0, 115, 0, 30)
+InfoDetails.BackgroundTransparency = 1
+InfoDetails.Text = "Type: -- | ID: --\nOwner: --\nContains Scripts: --"
+InfoDetails.TextColor3 = Color3.fromRGB(170, 170, 180)
+InfoDetails.Font = Enum.Font.Gotham
+InfoDetails.TextSize = 11
+InfoDetails.TextXAlignment = Enum.TextXAlignment.Left
+InfoDetails.TextYAlignment = Enum.TextYAlignment.Top
+InfoDetails.Parent = DetailPanel
+
+-- Bottom Buttons
+local CopyActionBtn = Instance.new("TextButton")
+CopyActionBtn.Size = UDim2.new(0, 100, 0, 24)
+CopyActionBtn.Position = UDim2.new(0, 115, 0, 82)
+CopyActionBtn.BackgroundColor3 = Color3.fromRGB(180, 20, 30)
+CopyActionBtn.Text = "Copy Asset ID"
+CopyActionBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
+CopyActionBtn.Font = Enum.Font.GothamBold
+CopyActionBtn.TextSize = 10
+CopyActionBtn.Parent = DetailPanel
+
+Instance.new("UICorner", CopyActionBtn).CornerRadius = UDim.new(0, 4)
+
+local AudioPlayBtn = Instance.new("TextButton")
+AudioPlayBtn.Size = UDim2.new(0, 100, 0, 24)
+AudioPlayBtn.Position = UDim2.new(0, 222, 0, 82)
+AudioPlayBtn.BackgroundColor3 = Color3.fromRGB(35, 35, 45)
+AudioPlayBtn.Text = "▶ Play Audio"
+AudioPlayBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
+AudioPlayBtn.Font = Enum.Font.GothamBold
+AudioPlayBtn.TextSize = 10
+AudioPlayBtn.Visible = false
+AudioPlayBtn.Parent = DetailPanel
+
+Instance.new("UICorner", AudioPlayBtn).CornerRadius = UDim.new(0, 4)
+
+----------------------------------------------------
+-- FUNCTIONS: Multi-Asset Handling & Details
+----------------------------------------------------
+local setClipboardFunc = setclipboard or toclipboard or set_clipboard or (syn and syn.write_clipboard)
+
+local function copyId(assetId)
+    if setClipboardFunc and assetId then
+        setClipboardFunc(tostring(assetId))
+    end
+end
+
+CopyActionBtn.MouseButton1Click:Connect(function()
+    if selectedAssetId then
+        copyId(selectedAssetId)
+        CopyActionBtn.Text = "Copied!"
+        CopyActionBtn.BackgroundColor3 = Color3.fromRGB(40, 160, 70)
+        task.wait(0.8)
+        CopyActionBtn.Text = "Copy Asset ID"
+        CopyActionBtn.BackgroundColor3 = Color3.fromRGB(180, 20, 30)
+    end
+end)
+
+local function inspectAsset(itemData)
+    local assetId = itemData.AssetId or itemData.Id or itemData.id
+    selectedAssetId = assetId
+    
+    DetailThumb.Image = "rbxthumb://type=Asset&id=" .. tostring(assetId) .. "&w=150&h=150"
+    InfoName.Text = itemData.Name or itemData.name or "Unknown Asset"
+    InfoDetails.Text = "Fetching info..."
+    AudioPlayBtn.Visible = false
+
+    if currentAudio then
+        currentAudio:Stop()
+        currentAudio:Destroy()
+        currentAudio = nil
+        AudioPlayBtn.Text = "▶ Play Audio"
+    end
+
+    task.spawn(function()
+        local categoryName = itemData.CustomType or "Asset"
+        local creatorName = itemData.CreatorName or "Unknown"
+        local hasScripts = "No"
+
+        local success, assetInfo = pcall(function()
+            return MarketplaceService:GetProductInfo(assetId)
+        end)
+
+        if success and assetInfo then
+            creatorName = assetInfo.Creator and assetInfo.Creator.Name or creatorName
+            local assetTypeId = assetInfo.AssetTypeId
+            
+            if assetTypeId == 3 then
+                categoryName = "🔊 Audio"
+                AudioPlayBtn.Visible = true
+            elseif assetTypeId == 10 or assetTypeId == 62 then
+                categoryName = "📦 Model"
+                hasScripts = "Yes (Model)"
+            elseif assetTypeId == 13 or assetTypeId == 1 then
+                categoryName = "🖼️ Decal / Image"
+            end
+        end
+
+        if categoryName == "🔊 Audio" then
+            AudioPlayBtn.Visible = true
+        end
+
+        InfoDetails.Text = string.format("Type: %s | ID: %s\nOwner: %s\nContains Scripts: %s", categoryName, tostring(assetId), creatorName, hasScripts)
+    end)
+end
+
+AudioPlayBtn.MouseButton1Click:Connect(function()
+    if not selectedAssetId then return end
+
+    if currentAudio and currentAudio.IsPlaying then
+        currentAudio:Stop()
+        currentAudio:Destroy()
+        currentAudio = nil
+        AudioPlayBtn.Text = "▶ Play Audio"
+        AudioPlayBtn.BackgroundColor3 = Color3.fromRGB(35, 35, 45)
+    else
+        if currentAudio then currentAudio:Destroy() end
+        currentAudio = Instance.new("Sound")
+        currentAudio.SoundId = "rbxassetid://" .. tostring(selectedAssetId)
+        currentAudio.Volume = 1
+        currentAudio.Parent = SoundService
+        currentAudio:Play()
+
+        AudioPlayBtn.Text = "⏸ Pause Audio"
+        AudioPlayBtn.BackgroundColor3 = Color3.fromRGB(180, 20, 30)
+
+        currentAudio.Ended:Connect(function()
+            AudioPlayBtn.Text = "▶ Play Audio"
+            AudioPlayBtn.BackgroundColor3 = Color3.fromRGB(35, 35, 45)
+            if currentAudio then
+                currentAudio:Destroy()
+                currentAudio = nil
+            end
+        end)
+    end
+end)
+
+local function clearGrid()
+    for _, child in ipairs(ScrollFrame:GetChildren()) do
+        if child:IsA("Frame") then
+            child:Destroy()
+        end
+    end
+end
+
+local function createAssetCard(itemData, fallbackType)
+    local assetId = itemData.AssetId or itemData.Id or itemData.id
+    local assetName = itemData.Name or itemData.name or "Unknown Asset"
+    itemData.CustomType = itemData.CustomType or fallbackType
+
+    local Card = Instance.new("Frame")
+    Card.BackgroundColor3 = Color3.fromRGB(22, 22, 28)
+    Card.BorderSizePixel = 0
+    Card.Parent = ScrollFrame
+
+    Instance.new("UICorner", Card).CornerRadius = UDim.new(0, 6)
+
+    local CardStroke = Instance.new("UIStroke")
+    CardStroke.Color = Color3.fromRGB(42, 35, 40)
+    CardStroke.Thickness = 1
+    CardStroke.Parent = Card
+
+    -- Thumbnail Display
+    local Thumbnail = Instance.new("ImageLabel")
+    Thumbnail.Size = UDim2.new(1, -8, 1, -24)
+    Thumbnail.Position = UDim2.new(0, 4, 0, 4)
+    Thumbnail.BackgroundColor3 = Color3.fromRGB(10, 10, 12)
+    Thumbnail.Image = "rbxthumb://type=Asset&id=" .. tostring(assetId) .. "&w=150&h=150"
+    Thumbnail.ScaleType = Enum.ScaleType.Fit
+    Thumbnail.Parent = Card
+
+    Instance.new("UICorner", Thumbnail).CornerRadius = UDim.new(0, 4)
+
+    -- Clickable Card Button
+    local CardBtn = Instance.new("TextButton")
+    CardBtn.Size = UDim2.new(1, 0, 1, 0)
+    CardBtn.BackgroundTransparency = 1
+    CardBtn.Text = ""
+    CardBtn.Parent = Card
+
+    -- Title Label
+    local NameLabel = Instance.new("TextLabel")
+    NameLabel.Size = UDim2.new(1, -8, 0, 16)
+    NameLabel.Position = UDim2.new(0, 4, 1, -18)
+    NameLabel.BackgroundTransparency = 1
+    NameLabel.Text = assetName
+    NameLabel.TextColor3 = Color3.fromRGB(200, 200, 205)
+    NameLabel.Font = Enum.Font.Gotham
+    NameLabel.TextSize = 10
+    NameLabel.TextTruncate = Enum.TextTruncate.AtEnd
+    NameLabel.Parent = Card
+
+    CardBtn.MouseButton1Click:Connect(function()
+        inspectAsset(itemData)
+    end)
+end
+
+-- Multi-Category Search Handler
+local function performSearch()
+    local query = SearchBox.Text
+    if query == "" then return end
+
+    SearchBtn.Text = "..."
+    clearGrid()
+
+    task.spawn(function()
+        -- 1. Search Models
+        if selectedCategory == "ALL" or selectedCategory == "Models" then
+            pcall(function()
+                local modelData = InsertService:GetFreeModelsAsync(query, 0)
+                if modelData and modelData[1] and modelData[1].Results then
+                    for _, item in ipairs(modelData[1].Results) do
+                        item.CustomType = "📦 Model"
+                        createAssetCard(item, "📦 Model")
+                    end
+                end
+            end)
+        end
+
+        -- 2. Search Decals
+        if selectedCategory == "ALL" or selectedCategory == "Decals" then
+            pcall(function()
+                local decalData = InsertService:GetFreeDecalsAsync(query, 0)
+                if decalData and decalData[1] and decalData[1].Results then
+                    for _, item in ipairs(decalData[1].Results) do
+                        item.CustomType = "🖼️ Decal / Image"
+                        createAssetCard(item, "🖼️ Decal / Image")
+                    end
+                end
+            end)
+        end
+
+        -- 3. Search Audio via Catalog HTTP
+        if selectedCategory == "ALL" or selectedCategory == "Audio" then
+            pcall(function()
+                local url = "https://catalog.roblox.com/v1/search/items/details?category=Audio&keyword=" .. HttpService:UrlEncode(query) .. "&limit=10"
+                local response = game:HttpGet(url)
+                local json = HttpService:JSONDecode(response)
+                if json and json.data then
+                    for _, item in ipairs(json.data) do
+                        item.CustomType = "🔊 Audio"
+                        createAssetCard(item, "🔊 Audio")
+                    end
+                end
+            end)
+        end
+
+        SearchBtn.Text = "Search"
+    end)
+end
+
+----------------------------------------------------
+-- 7. TOGGLE ANIMATION
+----------------------------------------------------
+local isOpen = false
+
+local function toggleUI()
+    isOpen = not isOpen
+    if isOpen then
+        MainFrame.Visible = true
+        MainFrame.Size = UDim2.new(0, 0, 0, 0)
+        TweenService:Create(MainFrame, TweenInfo.new(0.25, Enum.EasingStyle.Quart, Enum.EasingDirection.Out), {
+            Size = UDim2.new(0, 480, 0, 440)
+        }):Play()
+    else
+        if currentAudio then
+            currentAudio:Stop()
+            currentAudio:Destroy()
+            currentAudio = nil
+        end
+        local tween = TweenService:Create(MainFrame, TweenInfo.new(0.2, Enum.EasingStyle.Quart, Enum.EasingDirection.In), {
+            Size = UDim2.new(0, 0, 0, 0)
+        })
+        tween:Play()
+        tween.Completed:Connect(function()
+            if not isOpen then
+                MainFrame.Visible = false
+            end
+        end)
+    end
+end
+
+ToggleBtn.MouseButton1Click:Connect(toggleUI)
+CloseBtn.MouseButton1Click:Connect(toggleUI)
+SearchBtn.MouseButton1Click:Connect(performSearch)
+SearchBox.FocusLost:Connect(function(enter)
+    if enter then performSearch() end
+end)
