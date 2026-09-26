@@ -8,7 +8,7 @@ local LocalPlayer = Players.LocalPlayer
 local POLLINATIONS_URL = "https://text.pollinations.ai/"
 
 -- ⚠️ REPLACE THIS WITH YOUR ACTUAL SCRIPT'S RAW URL FOR REBOOT TO WORK ⚠️
-local SCRIPT_URL = "https://raw.githubusercontent.com/YourRepo/script.lua"
+local SCRIPT_URL = "https://raw.githubusercontent.com/ianjames9888-bot/Studio-lite-script/refs/heads/main/ArtStudio AI"
 
 if CoreGui:FindFirstChild("ArtStudioAI_UI") then
 	CoreGui.ArtStudioAI_UI:Destroy()
