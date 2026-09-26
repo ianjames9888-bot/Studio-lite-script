@@ -1,0 +1,1151 @@
+local UserInputService = game:GetService("UserInputService")
+local TweenService = game:GetService("TweenService")
+local HttpService = game:GetService("HttpService")
+local CoreGui = game:GetService("CoreGui")
+local Players = game:GetService("Players")
+
+local LocalPlayer = Players.LocalPlayer
+local POLLINATIONS_URL = "https://text.pollinations.ai/"
+
+-- ⚠️ REPLACE THIS WITH YOUR ACTUAL SCRIPT'S RAW URL FOR REBOOT TO WORK ⚠️
+local SCRIPT_URL = "https://raw.githubusercontent.com/YourRepo/script.lua"
+
+if CoreGui:FindFirstChild("ArtStudioAI_UI") then
+	CoreGui.ArtStudioAI_UI:Destroy()
+end
+
+local STORAGE_FILE = "ArtStudio_SavedChats.json"
+local SETTINGS_FILE = "ArtStudio_Settings.json"
+
+local SavedSessions, CurrentSessionId = {}, os.time()
+local SettingsData = { HasSeenTutorial = false }
+local isWaitingForAI = false
+local StagedCodeText = nil
+local ActiveDeletePanel = nil
+
+local function loadSavedData()
+	if readfile and isfile then
+		if isfile(STORAGE_FILE) then
+			pcall(function() SavedSessions = HttpService:JSONDecode(readfile(STORAGE_FILE)) end)
+		end
+		if isfile(SETTINGS_FILE) then
+			pcall(function() SettingsData = HttpService:JSONDecode(readfile(SETTINGS_FILE)) end)
+		end
+	end
+	if type(SavedSessions) ~= "table" then SavedSessions = {} end
+	if type(SettingsData) ~= "table" then SettingsData = { HasSeenTutorial = false } end
+end
+
+local function saveCurrentData()
+	if writefile then
+		pcall(function() writefile(STORAGE_FILE, HttpService:JSONEncode(SavedSessions)) end)
+		pcall(function() writefile(SETTINGS_FILE, HttpService:JSONEncode(SettingsData)) end)
+	end
+end
+loadSavedData()
+
+local ScreenGui = Instance.new("ScreenGui")
+ScreenGui.Name = "ArtStudioAI_UI"
+ScreenGui.ResetOnSpawn = false
+ScreenGui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
+pcall(function() ScreenGui.Parent = CoreGui end)
+if not ScreenGui.Parent then ScreenGui.Parent = LocalPlayer:WaitForChild("PlayerGui") end
+
+local Camera = workspace.CurrentCamera
+local ScreenSize = Camera.ViewportSize
+local IsMobile = UserInputService.TouchEnabled and not UserInputService.KeyboardEnabled
+
+local defaultWinWidth = IsMobile and math.clamp(ScreenSize.X * 0.88, 300, 380) or 380
+local defaultWinHeight = IsMobile and math.clamp(ScreenSize.Y * 0.60, 360, 520) or 480
+local circleBtnSize = IsMobile and 54 or 46
+
+local ToggleBtn = Instance.new("TextButton")
+ToggleBtn.Size = UDim2.new(0, circleBtnSize, 0, circleBtnSize)
+ToggleBtn.Position = UDim2.new(0, 20, 0.4, 0)
+ToggleBtn.BackgroundColor3 = Color3.fromRGB(24, 25, 32)
+ToggleBtn.BorderSizePixel = 0
+ToggleBtn.Text = "🖥️"
+ToggleBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
+ToggleBtn.TextSize = IsMobile and 22 or 18
+ToggleBtn.Active = true
+ToggleBtn.AutoButtonColor = false
+ToggleBtn.Parent = ScreenGui
+
+Instance.new("UICorner", ToggleBtn).CornerRadius = UDim.new(1, 0)
+local UIStrokeBtn = Instance.new("UIStroke", ToggleBtn)
+UIStrokeBtn.Color = Color3.fromRGB(138, 180, 248)
+UIStrokeBtn.Thickness = 2
+
+local MainFrame = Instance.new("Frame")
+MainFrame.Size = UDim2.new(0, defaultWinWidth, 0, defaultWinHeight)
+MainFrame.Position = UDim2.new(0.5, -defaultWinWidth/2, 0.5, -defaultWinHeight/2)
+MainFrame.BackgroundColor3 = Color3.fromRGB(19, 19, 22)
+MainFrame.BorderSizePixel = 0
+MainFrame.BackgroundTransparency = 1
+MainFrame.Visible = false
+MainFrame.ClipsDescendants = true
+MainFrame.Parent = ScreenGui
+
+Instance.new("UICorner", MainFrame).CornerRadius = UDim.new(0, 16)
+local UIStrokeMain = Instance.new("UIStroke", MainFrame)
+UIStrokeMain.Color = Color3.fromRGB(44, 45, 52)
+UIStrokeMain.Thickness = 1.5
+UIStrokeMain.Transparency = 1
+
+local TitleBar = Instance.new("Frame")
+TitleBar.Size = UDim2.new(1, 0, 0, 50)
+TitleBar.BackgroundColor3 = Color3.fromRGB(24, 25, 30)
+TitleBar.BorderSizePixel = 0
+TitleBar.Parent = MainFrame
+Instance.new("UICorner", TitleBar).CornerRadius = UDim.new(0, 16)
+
+local MenuToggle = Instance.new("TextButton")
+MenuToggle.Size = UDim2.new(0, 36, 0, 36)
+MenuToggle.Position = UDim2.new(0, 8, 0.5, -18)
+MenuToggle.BackgroundTransparency = 1
+MenuToggle.Text = "≡"
+MenuToggle.TextColor3 = Color3.fromRGB(200, 205, 220)
+MenuToggle.TextSize = 22
+MenuToggle.Font = Enum.Font.GothamMedium
+MenuToggle.Parent = TitleBar
+
+local TitleText = Instance.new("TextLabel")
+TitleText.Size = UDim2.new(1, -125, 0, 20)
+TitleText.Position = UDim2.new(0, 48, 0, 8)
+TitleText.BackgroundTransparency = 1
+TitleText.Text = "ArtStudio AI"
+TitleText.TextColor3 = Color3.fromRGB(240, 242, 255)
+TitleText.TextXAlignment = Enum.TextXAlignment.Left
+TitleText.Font = Enum.Font.GothamBold
+TitleText.TextSize = 15
+TitleText.Parent = TitleBar
+
+local SubtitleText = Instance.new("TextLabel")
+SubtitleText.Size = UDim2.new(1, -125, 0, 14)
+SubtitleText.Position = UDim2.new(0, 48, 0, 28)
+SubtitleText.BackgroundTransparency = 1
+SubtitleText.Text = "Powered by Pollinations AI"
+SubtitleText.TextColor3 = Color3.fromRGB(138, 180, 248)
+SubtitleText.TextXAlignment = Enum.TextXAlignment.Left
+SubtitleText.Font = Enum.Font.Gotham
+SubtitleText.TextSize = 11
+SubtitleText.Parent = TitleBar
+
+local HelpBtn = Instance.new("TextButton")
+HelpBtn.Size = UDim2.new(0, 32, 0, 32)
+HelpBtn.Position = UDim2.new(1, -76, 0.5, -16)
+HelpBtn.BackgroundTransparency = 1
+HelpBtn.Text = "❓"
+HelpBtn.TextColor3 = Color3.fromRGB(200, 205, 220)
+HelpBtn.TextSize = 16
+HelpBtn.Font = Enum.Font.GothamMedium
+HelpBtn.Parent = TitleBar
+
+local NewChatBtn = Instance.new("TextButton")
+NewChatBtn.Size = UDim2.new(0, 32, 0, 32)
+NewChatBtn.Position = UDim2.new(1, -40, 0.5, -16)
+NewChatBtn.BackgroundTransparency = 1
+NewChatBtn.Text = "＋"
+NewChatBtn.TextColor3 = Color3.fromRGB(200, 205, 220)
+NewChatBtn.TextSize = 18
+NewChatBtn.Font = Enum.Font.GothamMedium
+NewChatBtn.Parent = TitleBar
+
+local Sidebar = Instance.new("Frame")
+Sidebar.Size = UDim2.new(0.65, 0, 1, -50)
+Sidebar.Position = UDim2.new(-0.65, 0, 0, 50)
+Sidebar.BackgroundColor3 = Color3.fromRGB(24, 25, 30)
+Sidebar.BorderSizePixel = 0
+Sidebar.ZIndex = 10
+Sidebar.Parent = MainFrame
+
+local SidebarScroll = Instance.new("ScrollingFrame")
+SidebarScroll.Size = UDim2.new(1, -12, 1, -50)
+SidebarScroll.Position = UDim2.new(0, 6, 0, 5)
+SidebarScroll.BackgroundTransparency = 1
+SidebarScroll.BorderSizePixel = 0
+SidebarScroll.ScrollBarThickness = 3
+SidebarScroll.CanvasSize = UDim2.new(0, 0, 0, 0)
+SidebarScroll.ZIndex = 11
+SidebarScroll.Parent = Sidebar
+
+local SidebarLayout = Instance.new("UIListLayout", SidebarScroll)
+SidebarLayout.SortOrder = Enum.SortOrder.LayoutOrder
+SidebarLayout.Padding = UDim.new(0, 6)
+SidebarLayout:GetPropertyChangedSignal("AbsoluteContentSize"):Connect(function()
+	SidebarScroll.CanvasSize = UDim2.new(0, 0, 0, SidebarLayout.AbsoluteContentSize.Y + 10)
+end)
+
+local RebootBtn = Instance.new("TextButton")
+RebootBtn.Size = UDim2.new(1, -12, 0, 32)
+RebootBtn.Position = UDim2.new(0, 6, 1, -38)
+RebootBtn.BackgroundColor3 = Color3.fromRGB(45, 30, 35)
+RebootBtn.Text = "🔄 Reboot Script"
+RebootBtn.TextColor3 = Color3.fromRGB(255, 140, 140)
+RebootBtn.Font = Enum.Font.GothamBold
+RebootBtn.TextSize = 11
+RebootBtn.ZIndex = 12
+RebootBtn.Parent = Sidebar
+Instance.new("UICorner", RebootBtn).CornerRadius = UDim.new(0, 6)
+local RebootStroke = Instance.new("UIStroke", RebootBtn)
+RebootStroke.Color = Color3.fromRGB(90, 40, 50)
+
+RebootBtn.MouseButton1Click:Connect(function()
+	ScreenGui:Destroy()
+	task.wait(0.1)
+	loadstring(game:HttpGet(SCRIPT_URL))()
+end)
+
+local sidebarOpen = false
+MenuToggle.MouseButton1Click:Connect(function()
+	sidebarOpen = not sidebarOpen
+	TweenService:Create(Sidebar, TweenInfo.new(0.25, Enum.EasingStyle.Quart, Enum.EasingDirection.Out), {
+		Position = sidebarOpen and UDim2.new(0, 0, 0, 50) or UDim2.new(-0.65, 0, 0, 50)
+	}):Play()
+end)
+
+local ChatScroll = Instance.new("ScrollingFrame")
+ChatScroll.Size = UDim2.new(1, -16, 1, -112)
+ChatScroll.Position = UDim2.new(0, 8, 0, 56)
+ChatScroll.BackgroundTransparency = 1
+ChatScroll.BorderSizePixel = 0
+ChatScroll.ScrollBarThickness = 4
+ChatScroll.ScrollBarImageColor3 = Color3.fromRGB(60, 64, 75)
+ChatScroll.CanvasSize = UDim2.new(0, 0, 0, 0)
+ChatScroll.Parent = MainFrame
+
+local UIListLayout = Instance.new("UIListLayout", ChatScroll)
+UIListLayout.SortOrder = Enum.SortOrder.LayoutOrder
+UIListLayout.Padding = UDim.new(0, 10)
+UIListLayout:GetPropertyChangedSignal("AbsoluteContentSize"):Connect(function()
+	ChatScroll.CanvasSize = UDim2.new(0, 0, 0, UIListLayout.AbsoluteContentSize.Y + 10)
+	TweenService:Create(ChatScroll, TweenInfo.new(0.2, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), {
+		CanvasPosition = Vector2.new(0, ChatScroll.CanvasSize.Y.Offset)
+	}):Play()
+end)
+
+local AttachmentCard = Instance.new("Frame")
+AttachmentCard.Size = UDim2.new(1, -16, 0, 32)
+AttachmentCard.Position = UDim2.new(0, 8, 1, -88)
+AttachmentCard.BackgroundColor3 = Color3.fromRGB(26, 28, 36)
+AttachmentCard.BorderSizePixel = 0
+AttachmentCard.Visible = false
+AttachmentCard.ZIndex = 8
+AttachmentCard.ClipsDescendants = true
+AttachmentCard.Parent = MainFrame
+Instance.new("UICorner", AttachmentCard).CornerRadius = UDim.new(0, 8)
+
+local AttachmentStroke = Instance.new("UIStroke", AttachmentCard)
+AttachmentStroke.Color = Color3.fromRGB(60, 65, 85)
+AttachmentStroke.Thickness = 1
+
+local AttachCardTitle = Instance.new("TextLabel")
+AttachCardTitle.Size = UDim2.new(1, -110, 0, 32)
+AttachCardTitle.Position = UDim2.new(0, 10, 0, 0)
+AttachCardTitle.BackgroundTransparency = 1
+AttachCardTitle.Text = "📜 Attached Code Snippet"
+AttachCardTitle.TextColor3 = Color3.fromRGB(160, 225, 160)
+AttachCardTitle.Font = Enum.Font.GothamBold
+AttachCardTitle.TextSize = 11
+AttachCardTitle.TextXAlignment = Enum.TextXAlignment.Left
+AttachCardTitle.Parent = AttachmentCard
+
+local AttachCardToggle = Instance.new("TextButton")
+AttachCardToggle.Size = UDim2.new(0, 55, 0, 22)
+AttachCardToggle.Position = UDim2.new(1, -92, 0, 5)
+AttachCardToggle.BackgroundColor3 = Color3.fromRGB(40, 44, 58)
+AttachCardToggle.Text = "▲ View"
+AttachCardToggle.TextColor3 = Color3.fromRGB(200, 210, 240)
+AttachCardToggle.Font = Enum.Font.GothamBold
+AttachCardToggle.TextSize = 10
+AttachCardToggle.Parent = AttachmentCard
+Instance.new("UICorner", AttachCardToggle).CornerRadius = UDim.new(0, 4)
+
+local AttachCardRemove = Instance.new("TextButton")
+AttachCardRemove.Size = UDim2.new(0, 26, 0, 22)
+AttachCardRemove.Position = UDim2.new(1, -32, 0, 5)
+AttachCardRemove.BackgroundColor3 = Color3.fromRGB(60, 35, 40)
+AttachCardRemove.Text = "✕"
+AttachCardRemove.TextColor3 = Color3.fromRGB(255, 150, 150)
+AttachCardRemove.Font = Enum.Font.GothamBold
+AttachCardRemove.TextSize = 11
+AttachCardRemove.Parent = AttachmentCard
+Instance.new("UICorner", AttachCardRemove).CornerRadius = UDim.new(0, 4)
+
+local AttachCodePreview = Instance.new("TextLabel")
+AttachCodePreview.Size = UDim2.new(1, -20, 0, 80)
+AttachCodePreview.Position = UDim2.new(0, 10, 0, 34)
+AttachCodePreview.BackgroundTransparency = 1
+AttachCodePreview.Text = ""
+AttachCodePreview.TextColor3 = Color3.fromRGB(180, 230, 180)
+AttachCodePreview.Font = Enum.Font.Code
+AttachCodePreview.TextSize = 11
+AttachCodePreview.TextWrapped = true
+AttachCodePreview.TextXAlignment = Enum.TextXAlignment.Left
+AttachCodePreview.TextYAlignment = Enum.TextYAlignment.Top
+AttachCodePreview.Parent = AttachmentCard
+
+local InputFrame = Instance.new("Frame")
+InputFrame.Size = UDim2.new(1, -16, 0, 44)
+InputFrame.Position = UDim2.new(0, 8, 1, -52)
+InputFrame.BackgroundColor3 = Color3.fromRGB(28, 29, 36)
+InputFrame.BorderSizePixel = 0
+InputFrame.Parent = MainFrame
+Instance.new("UICorner", InputFrame).CornerRadius = UDim.new(0, 22)
+
+local UIStrokeInput = Instance.new("UIStroke", InputFrame)
+UIStrokeInput.Color = Color3.fromRGB(50, 52, 65)
+UIStrokeInput.Thickness = 1
+
+local isPreviewExpanded = false
+local function updateInputFramePos()
+	local inputH = InputFrame.Size.Y.Offset
+	if StagedCodeText then
+		AttachmentCard.Visible = true
+		local cardH = isPreviewExpanded and 120 or 32
+		AttachmentCard.Size = UDim2.new(1, -16, 0, cardH)
+		AttachmentCard.Position = UDim2.new(0, 8, 1, -inputH - cardH - 12)
+		ChatScroll.Size = UDim2.new(1, -16, 1, -inputH - cardH - 68)
+	else
+		AttachmentCard.Visible = false
+		ChatScroll.Size = UDim2.new(1, -16, 1, -inputH - 68)
+	end
+end
+
+AttachCardToggle.MouseButton1Click:Connect(function()
+	isPreviewExpanded = not isPreviewExpanded
+	AttachCardToggle.Text = isPreviewExpanded and "▼ Hide" or "▲ View"
+	updateInputFramePos()
+end)
+
+AttachCardRemove.MouseButton1Click:Connect(function()
+	StagedCodeText = nil
+	isPreviewExpanded = false
+	AttachCardToggle.Text = "▲ View"
+	updateInputFramePos()
+end)
+
+local AttachBtn = Instance.new("TextButton")
+AttachBtn.Size = UDim2.new(0, 32, 0, 32)
+AttachBtn.Position = UDim2.new(0, 6, 0.5, -16)
+AttachBtn.BackgroundTransparency = 1
+AttachBtn.Text = "＋"
+AttachBtn.TextColor3 = Color3.fromRGB(180, 185, 200)
+AttachBtn.Font = Enum.Font.GothamMedium
+AttachBtn.TextSize = 18
+AttachBtn.Parent = InputFrame
+
+local TextScroll = Instance.new("ScrollingFrame")
+TextScroll.Size = UDim2.new(1, -88, 1, -10)
+TextScroll.Position = UDim2.new(0, 42, 0, 5)
+TextScroll.BackgroundTransparency = 1
+TextScroll.BorderSizePixel = 0
+TextScroll.ScrollBarThickness = 2
+TextScroll.CanvasSize = UDim2.new(0, 0, 0, 0)
+TextScroll.Parent = InputFrame
+
+local TextBox = Instance.new("TextBox")
+TextBox.Size = UDim2.new(1, 0, 1, 0)
+TextBox.BackgroundTransparency = 1
+TextBox.PlaceholderText = "Ask ArtStudio AI..."
+TextBox.PlaceholderColor3 = Color3.fromRGB(110, 115, 135)
+TextBox.Text = ""
+TextBox.TextColor3 = Color3.fromRGB(245, 245, 255)
+TextBox.Font = Enum.Font.Gotham
+TextBox.TextSize = 13
+TextBox.ClearTextOnFocus = false
+TextBox.MultiLine = true
+TextBox.TextWrapped = true
+TextBox.TextXAlignment = Enum.TextXAlignment.Left
+TextBox.TextYAlignment = Enum.TextYAlignment.Center
+TextBox.Parent = TextScroll
+
+TextBox:GetPropertyChangedSignal("Text"):Connect(function()
+	local bounds = TextBox.TextBounds.Y
+	local newHeight = math.clamp(bounds + 20, 44, 100)
+	InputFrame.Size = UDim2.new(1, -16, 0, newHeight)
+	InputFrame.Position = UDim2.new(0, 8, 1, -newHeight - 8)
+	TextScroll.CanvasSize = UDim2.new(0, 0, 0, bounds + 10)
+	updateInputFramePos()
+end)
+
+local SendBtn = Instance.new("TextButton")
+SendBtn.Size = UDim2.new(0, 32, 0, 32)
+SendBtn.Position = UDim2.new(1, -38, 1, -38)
+SendBtn.BackgroundColor3 = Color3.fromRGB(138, 180, 248)
+SendBtn.Text = "➔"
+SendBtn.TextColor3 = Color3.fromRGB(20, 20, 25)
+SendBtn.Font = Enum.Font.GothamBold
+SendBtn.TextSize = 16
+SendBtn.AutoButtonColor = false
+SendBtn.Parent = InputFrame
+Instance.new("UICorner", SendBtn).CornerRadius = UDim.new(1, 0)
+
+local AttachMenu = Instance.new("Frame")
+AttachMenu.Size = UDim2.new(0, 130, 0, 40)
+AttachMenu.Position = UDim2.new(0, 8, 1, -100)
+AttachMenu.BackgroundColor3 = Color3.fromRGB(34, 36, 46)
+AttachMenu.BorderSizePixel = 0
+AttachMenu.Visible = false
+AttachMenu.ZIndex = 20
+AttachMenu.Parent = MainFrame
+Instance.new("UICorner", AttachMenu).CornerRadius = UDim.new(0, 8)
+local AttachMenuStroke = Instance.new("UIStroke", AttachMenu)
+AttachMenuStroke.Color = Color3.fromRGB(60, 64, 80)
+
+local SendCodeMenuBtn = Instance.new("TextButton")
+SendCodeMenuBtn.Size = UDim2.new(1, 0, 1, 0)
+SendCodeMenuBtn.BackgroundTransparency = 1
+SendCodeMenuBtn.Text = "📜 Send Code"
+SendCodeMenuBtn.TextColor3 = Color3.fromRGB(230, 235, 250)
+SendCodeMenuBtn.Font = Enum.Font.GothamMedium
+SendCodeMenuBtn.TextSize = 12
+SendCodeMenuBtn.ZIndex = 21
+SendCodeMenuBtn.Parent = AttachMenu
+
+AttachBtn.MouseButton1Click:Connect(function()
+	AttachMenu.Visible = not AttachMenu.Visible
+end)
+
+local CodeModal = Instance.new("Frame")
+CodeModal.Size = UDim2.new(0.9, 0, 0.8, 0)
+CodeModal.Position = UDim2.new(0.05, 0, 0.1, 0)
+CodeModal.BackgroundColor3 = Color3.fromRGB(22, 23, 28)
+CodeModal.BorderSizePixel = 0
+CodeModal.Visible = false
+CodeModal.ZIndex = 30
+CodeModal.Parent = MainFrame
+Instance.new("UICorner", CodeModal).CornerRadius = UDim.new(0, 12)
+local CodeModalStroke = Instance.new("UIStroke", CodeModal)
+CodeModalStroke.Color = Color3.fromRGB(60, 64, 80)
+
+local CodeModalTitle = Instance.new("TextLabel")
+CodeModalTitle.Size = UDim2.new(1, -20, 0, 30)
+CodeModalTitle.Position = UDim2.new(0, 10, 0, 8)
+CodeModalTitle.BackgroundTransparency = 1
+CodeModalTitle.Text = "Paste Your Script / Code"
+CodeModalTitle.TextColor3 = Color3.fromRGB(240, 242, 255)
+CodeModalTitle.Font = Enum.Font.GothamBold
+CodeModalTitle.TextSize = 14
+CodeModalTitle.TextXAlignment = Enum.TextXAlignment.Left
+CodeModalTitle.ZIndex = 31
+CodeModalTitle.Parent = CodeModal
+
+local CodeBoxScroll = Instance.new("ScrollingFrame")
+CodeBoxScroll.Size = UDim2.new(1, -20, 1, -90)
+CodeBoxScroll.Position = UDim2.new(0, 10, 0, 40)
+CodeBoxScroll.BackgroundColor3 = Color3.fromRGB(15, 16, 20)
+CodeBoxScroll.BorderSizePixel = 0
+CodeBoxScroll.ScrollBarThickness = 4
+CodeBoxScroll.ZIndex = 31
+CodeBoxScroll.Parent = CodeModal
+Instance.new("UICorner", CodeBoxScroll).CornerRadius = UDim.new(0, 8)
+
+local CodeTextBox = Instance.new("TextBox")
+CodeTextBox.Size = UDim2.new(1, -12, 0, 0)
+CodeTextBox.Position = UDim2.new(0, 6, 0, 6)
+CodeTextBox.BackgroundTransparency = 1
+CodeTextBox.PlaceholderText = "-- Paste code here..."
+CodeTextBox.PlaceholderColor3 = Color3.fromRGB(90, 95, 110)
+CodeTextBox.Text = ""
+CodeTextBox.TextColor3 = Color3.fromRGB(160, 225, 160)
+CodeTextBox.Font = Enum.Font.Code
+CodeTextBox.TextSize = 12
+CodeTextBox.ClearTextOnFocus = false
+CodeTextBox.MultiLine = true
+CodeTextBox.TextWrapped = true
+CodeTextBox.TextXAlignment = Enum.TextXAlignment.Left
+CodeTextBox.TextYAlignment = Enum.TextYAlignment.Top
+CodeTextBox.ZIndex = 32
+CodeTextBox.Parent = CodeBoxScroll
+
+CodeTextBox:GetPropertyChangedSignal("TextBounds"):Connect(function()
+	local h = math.max(CodeBoxScroll.AbsoluteSize.Y, CodeTextBox.TextBounds.Y + 20)
+	CodeTextBox.Size = UDim2.new(1, -12, 0, CodeTextBox.TextBounds.Y + 20)
+	CodeBoxScroll.CanvasSize = UDim2.new(0, 0, 0, h)
+end)
+
+local CodeModalSubmit = Instance.new("TextButton")
+CodeModalSubmit.Size = UDim2.new(0, 100, 0, 30)
+CodeModalSubmit.Position = UDim2.new(1, -110, 1, -38)
+CodeModalSubmit.BackgroundColor3 = Color3.fromRGB(138, 180, 248)
+CodeModalSubmit.Text = "Attach Code"
+CodeModalSubmit.TextColor3 = Color3.fromRGB(20, 20, 25)
+CodeModalSubmit.Font = Enum.Font.GothamBold
+CodeModalSubmit.TextSize = 12
+CodeModalSubmit.ZIndex = 31
+CodeModalSubmit.Parent = CodeModal
+Instance.new("UICorner", CodeModalSubmit).CornerRadius = UDim.new(0, 6)
+
+local CodeModalCancel = Instance.new("TextButton")
+CodeModalCancel.Size = UDim2.new(0, 80, 0, 30)
+CodeModalCancel.Position = UDim2.new(1, -200, 1, -38)
+CodeModalCancel.BackgroundColor3 = Color3.fromRGB(45, 48, 60)
+CodeModalCancel.Text = "Cancel"
+CodeModalCancel.TextColor3 = Color3.fromRGB(220, 225, 240)
+CodeModalCancel.Font = Enum.Font.Gotham
+CodeModalCancel.TextSize = 12
+CodeModalCancel.ZIndex = 31
+CodeModalCancel.Parent = CodeModal
+Instance.new("UICorner", CodeModalCancel).CornerRadius = UDim.new(0, 6)
+
+SendCodeMenuBtn.MouseButton1Click:Connect(function()
+	AttachMenu.Visible = false
+	CodeModal.Visible = true
+end)
+
+CodeModalCancel.MouseButton1Click:Connect(function()
+	CodeModal.Visible = false
+	CodeTextBox.Text = ""
+end)
+
+CodeModalSubmit.MouseButton1Click:Connect(function()
+	local text = CodeTextBox.Text
+	if text and text:gsub("%s+", "") ~= "" then
+		StagedCodeText = text
+		CodeModal.Visible = false
+		CodeTextBox.Text = ""
+		AttachCodePreview.Text = text:sub(1, 200) .. (#text > 200 and "..." or "")
+		updateInputFramePos()
+	end
+end)
+
+-- TUTORIAL WINDOW
+local TutorialModal = Instance.new("Frame")
+TutorialModal.Size = UDim2.new(0.9, 0, 0.82, 0)
+TutorialModal.Position = UDim2.new(0.05, 0, 0.09, 0)
+TutorialModal.BackgroundColor3 = Color3.fromRGB(22, 23, 28)
+TutorialModal.BorderSizePixel = 0
+TutorialModal.Visible = false
+TutorialModal.ZIndex = 40
+TutorialModal.Parent = MainFrame
+Instance.new("UICorner", TutorialModal).CornerRadius = UDim.new(0, 12)
+local TutModalStroke = Instance.new("UIStroke", TutorialModal)
+TutModalStroke.Color = Color3.fromRGB(138, 180, 248)
+
+local TutTitle = Instance.new("TextLabel")
+TutTitle.Size = UDim2.new(1, -20, 0, 30)
+TutTitle.Position = UDim2.new(0, 10, 0, 8)
+TutTitle.BackgroundTransparency = 1
+TutTitle.Text = "📖 ArtStudio AI Guide"
+TutTitle.TextColor3 = Color3.fromRGB(240, 242, 255)
+TutTitle.Font = Enum.Font.GothamBold
+TutTitle.TextSize = 15
+TutTitle.TextXAlignment = Enum.TextXAlignment.Left
+TutTitle.ZIndex = 41
+TutTitle.Parent = TutorialModal
+
+local TutScroll = Instance.new("ScrollingFrame")
+TutScroll.Size = UDim2.new(1, -20, 1, -85)
+TutScroll.Position = UDim2.new(0, 10, 0, 40)
+TutScroll.BackgroundTransparency = 1
+TutScroll.BorderSizePixel = 0
+TutScroll.ScrollBarThickness = 3
+TutScroll.ZIndex = 41
+TutScroll.Parent = TutorialModal
+
+local TutText = Instance.new("TextLabel")
+TutText.Size = UDim2.new(1, -6, 0, 0)
+TutText.BackgroundTransparency = 1
+TutText.Text = "<b>Welcome to ArtStudio AI!</b>\n\n" ..
+	"<b>💬 Asking Questions:</b> Type your query in the bottom input bar and tap Send.\n\n" ..
+	"<b>📜 Attaching Code:</b> Tap the <b>+</b> button inside the prompt bar and select <b>Send Code</b> to paste large Lua scripts.\n\n" ..
+	"<b>🔍 Viewing Code Blocks:</b> Responses containing code feature an <b>▲ Expand</b> button to make the code box scrollable without truncating any lines.\n\n" ..
+	"<b>📁 Managing Conversations:</b> Open the sidebar menu (≡) to switch between saved chats or long-press a chat to delete it.\n\n" ..
+	"<b>🔄 Rebooting:</b> Need to reset or re-initialize? Open the sidebar (≡) and tap <b>Reboot Script</b>."
+TutText.TextColor3 = Color3.fromRGB(210, 215, 230)
+TutText.Font = Enum.Font.Gotham
+TutText.TextSize = 12
+TutText.RichText = true
+TutText.TextWrapped = true
+TutText.TextXAlignment = Enum.TextXAlignment.Left
+TutText.TextYAlignment = Enum.TextYAlignment.Top
+TutText.ZIndex = 42
+TutText.Parent = TutScroll
+
+TutText:GetPropertyChangedSignal("TextBounds"):Connect(function()
+	TutText.Size = UDim2.new(1, -6, 0, TutText.TextBounds.Y + 10)
+	TutScroll.CanvasSize = UDim2.new(0, 0, 0, TutText.TextBounds.Y + 10)
+end)
+
+local TutGotItBtn = Instance.new("TextButton")
+TutGotItBtn.Size = UDim2.new(0, 120, 0, 30)
+TutGotItBtn.Position = UDim2.new(0.5, -60, 1, -38)
+TutGotItBtn.BackgroundColor3 = Color3.fromRGB(60, 65, 80)
+TutGotItBtn.Text = "Got It (5s)"
+TutGotItBtn.TextColor3 = Color3.fromRGB(160, 165, 180)
+TutGotItBtn.Font = Enum.Font.GothamBold
+TutGotItBtn.TextSize = 12
+TutGotItBtn.ZIndex = 41
+TutGotItBtn.Parent = TutorialModal
+Instance.new("UICorner", TutGotItBtn).CornerRadius = UDim.new(0, 6)
+
+local function openTutorialWithCooldown()
+	TutorialModal.Visible = true
+	TutGotItBtn.BackgroundColor3 = Color3.fromRGB(60, 65, 80)
+	TutGotItBtn.TextColor3 = Color3.fromRGB(160, 165, 180)
+	
+	task.spawn(function()
+		for i = 5, 1, -1 do
+			TutGotItBtn.Text = "Got It (" .. i .. "s)"
+			task.wait(1)
+		end
+		TutGotItBtn.Text = "Got It"
+		TutGotItBtn.BackgroundColor3 = Color3.fromRGB(138, 180, 248)
+		TutGotItBtn.TextColor3 = Color3.fromRGB(20, 20, 25)
+	end)
+end
+
+TutGotItBtn.MouseButton1Click:Connect(function()
+	if TutGotItBtn.Text == "Got It" then
+		TutorialModal.Visible = false
+		if not SettingsData.HasSeenTutorial then
+			SettingsData.HasSeenTutorial = true
+			saveCurrentData()
+		end
+	end
+end)
+
+HelpBtn.MouseButton1Click:Connect(function()
+	openTutorialWithCooldown()
+end)
+
+local ResizeHandle = Instance.new("ImageButton")
+ResizeHandle.Size = UDim2.new(0, 18, 0, 18)
+ResizeHandle.Position = UDim2.new(1, -18, 1, -18)
+ResizeHandle.BackgroundTransparency = 1
+ResizeHandle.Image = "rbxassetid://6031280882"
+ResizeHandle.ImageColor3 = Color3.fromRGB(100, 105, 130)
+ResizeHandle.ZIndex = 5
+ResizeHandle.Parent = MainFrame
+
+MainFrame:GetPropertyChangedSignal("AbsoluteSize"):Connect(function()
+	updateInputFramePos()
+end)
+
+local function enableDrag(frameToDrag, handle)
+	handle = handle or frameToDrag
+	local dragging, dragStart, startPos, dragInput
+
+	handle.InputBegan:Connect(function(input)
+		if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
+			dragging = true
+			dragStart = input.Position
+			startPos = frameToDrag.Position
+			input.Changed:Connect(function()
+				if input.UserInputState == Enum.UserInputState.End then dragging = false end
+			end)
+		end
+	end)
+
+	handle.InputChanged:Connect(function(input)
+		if input.UserInputType == Enum.UserInputType.MouseMovement or input.UserInputType == Enum.UserInputType.Touch then
+			dragInput = input
+		end
+	end)
+
+	UserInputService.InputChanged:Connect(function(input)
+		if input == dragInput and dragging then
+			local delta = input.Position - dragStart
+			TweenService:Create(frameToDrag, TweenInfo.new(0.08, Enum.EasingStyle.Linear), {
+				Position = UDim2.new(startPos.X.Scale, startPos.X.Offset + delta.X, startPos.Y.Scale, startPos.Y.Offset + delta.Y)
+			}):Play()
+		end
+	end)
+end
+
+enableDrag(ToggleBtn)
+enableDrag(MainFrame, TitleBar)
+
+local resizing = false
+local resizeStart, startSize
+
+ResizeHandle.InputBegan:Connect(function(input)
+	if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
+		resizing = true
+		resizeStart = input.Position
+		startSize = MainFrame.AbsoluteSize
+	end
+end)
+
+UserInputService.InputChanged:Connect(function(input)
+	if resizing and (input.UserInputType == Enum.UserInputType.MouseMovement or input.UserInputType == Enum.UserInputType.Touch) then
+		local delta = input.Position - resizeStart
+		local minW, minH = IsMobile and 280 or 320, IsMobile and 320 or 360
+		MainFrame.Size = UDim2.new(0, math.clamp(startSize.X + delta.X, minW, ScreenSize.X - 20), 0, math.clamp(startSize.Y + delta.Y, minH, ScreenSize.Y - 20))
+	end
+end)
+
+UserInputService.InputEnded:Connect(function(input)
+	if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
+		resizing = false
+	end
+end)
+
+local isOpen = false
+local originalSize = MainFrame.Size
+
+ToggleBtn.MouseButton1Click:Connect(function()
+	isOpen = not isOpen
+	if isOpen then
+		MainFrame.Visible = true
+		MainFrame.Size = UDim2.new(0, originalSize.X.Offset * 0.9, 0, originalSize.Y.Offset * 0.9)
+		MainFrame.BackgroundTransparency = 1
+		UIStrokeMain.Transparency = 1
+		TweenService:Create(MainFrame, TweenInfo.new(0.3, Enum.EasingStyle.Back, Enum.EasingDirection.Out), {Size = originalSize, BackgroundTransparency = 0}):Play()
+		TweenService:Create(UIStrokeMain, TweenInfo.new(0.3, Enum.EasingStyle.Quart, Enum.EasingDirection.Out), {Transparency = 0}):Play()
+	else
+		originalSize = MainFrame.Size
+		local shrink = TweenService:Create(MainFrame, TweenInfo.new(0.2, Enum.EasingStyle.Quart, Enum.EasingDirection.In), {Size = UDim2.new(0, originalSize.X.Offset * 0.9, 0, originalSize.Y.Offset * 0.9), BackgroundTransparency = 1})
+		TweenService:Create(UIStrokeMain, TweenInfo.new(0.2, Enum.EasingStyle.Quart, Enum.EasingDirection.In), {Transparency = 1}):Play()
+		shrink:Play()
+		shrink.Completed:Connect(function()
+			if not isOpen then MainFrame.Visible = false end
+		end)
+	end
+end)
+
+local function copyToClipboard(text)
+	if setclipboard then setclipboard(text) elseif toclipboard then toclipboard(text) end
+end
+
+local function setInputLock(locked)
+	isWaitingForAI = locked
+	TextBox.TextEditable = not locked
+	SendBtn.AutoButtonColor = not locked
+	SendBtn.BackgroundColor3 = locked and Color3.fromRGB(70, 75, 90) or Color3.fromRGB(138, 180, 248)
+end
+
+local handleSend, renderMessage, ConversationHistory = nil, nil, {}
+
+renderMessage = function(sender, rawText, isError, retryPrompt)
+	local isUser = (sender == "You")
+	local Wrapper = Instance.new("Frame")
+	Wrapper.Size = UDim2.new(1, -10, 0, 0)
+	Wrapper.BackgroundTransparency = 1
+	Wrapper.Parent = ChatScroll
+
+	local WrapperLayout = Instance.new("UIListLayout", Wrapper)
+	WrapperLayout.SortOrder = Enum.SortOrder.LayoutOrder
+	WrapperLayout.Padding = UDim.new(0, 6)
+
+	local segments = {}
+	local currentIdx = 1
+
+	while currentIdx <= #rawText do
+		local matchStart, matchEnd, codeContent = rawText:find("```%w*%s*(.-)```", currentIdx)
+		if matchStart then
+			if matchStart > currentIdx then
+				table.insert(segments, {type = "text", content = rawText:sub(currentIdx, matchStart - 1)})
+			end
+			table.insert(segments, {type = "code", content = codeContent})
+			currentIdx = matchEnd + 1
+		else
+			table.insert(segments, {type = "text", content = rawText:sub(currentIdx)})
+			break
+		end
+	end
+
+	for _, seg in ipairs(segments) do
+		if seg.type == "text" and seg.content:gsub("%s+", "") ~= "" then
+			local MsgLabel = Instance.new("TextLabel")
+			MsgLabel.Size = UDim2.new(1, 0, 0, 0)
+			MsgLabel.BackgroundTransparency = 1
+			MsgLabel.Text = (isUser and "<b>You:</b> " or "<b>ArtStudio AI:</b> ") .. seg.content
+			MsgLabel.TextColor3 = isError and Color3.fromRGB(255, 110, 110) or (isUser and Color3.fromRGB(175, 210, 255) or Color3.fromRGB(230, 232, 245))
+			MsgLabel.Font = Enum.Font.Gotham
+			MsgLabel.TextSize = 13
+			MsgLabel.TextWrapped = true
+			MsgLabel.RichText = true
+			MsgLabel.TextXAlignment = Enum.TextXAlignment.Left
+			MsgLabel.Parent = Wrapper
+			MsgLabel.Size = UDim2.new(1, 0, 0, MsgLabel.TextBounds.Y + 4)
+		elseif seg.type == "code" then
+			local CodeContainer = Instance.new("Frame")
+			CodeContainer.Size = UDim2.new(1, 0, 0, 30)
+			CodeContainer.BackgroundColor3 = Color3.fromRGB(13, 14, 18)
+			CodeContainer.BorderSizePixel = 0
+			CodeContainer.ClipsDescendants = true
+			CodeContainer.Parent = Wrapper
+			Instance.new("UICorner", CodeContainer).CornerRadius = UDim.new(0, 8)
+			
+			local CodeStroke = Instance.new("UIStroke", CodeContainer)
+			CodeStroke.Color = Color3.fromRGB(40, 42, 52)
+			CodeStroke.Thickness = 1
+
+			local ControlsHeader = Instance.new("Frame")
+			ControlsHeader.Size = UDim2.new(1, 0, 0, 28)
+			ControlsHeader.BackgroundTransparency = 1
+			ControlsHeader.Parent = CodeContainer
+
+			local HeaderTitle = Instance.new("TextLabel")
+			HeaderTitle.Size = UDim2.new(1, -150, 1, 0)
+			HeaderTitle.Position = UDim2.new(0, 8, 0, 0)
+			HeaderTitle.BackgroundTransparency = 1
+			HeaderTitle.Text = "📜 Code Block"
+			HeaderTitle.TextColor3 = Color3.fromRGB(160, 225, 160)
+			HeaderTitle.Font = Enum.Font.GothamBold
+			HeaderTitle.TextSize = 10
+			HeaderTitle.TextXAlignment = Enum.TextXAlignment.Left
+			HeaderTitle.Parent = ControlsHeader
+
+			local CopyBtn = Instance.new("TextButton")
+			CopyBtn.Size = UDim2.new(0, 50, 0, 22)
+			CopyBtn.Position = UDim2.new(1, -56, 0, 3)
+			CopyBtn.BackgroundColor3 = Color3.fromRGB(35, 38, 50)
+			CopyBtn.Text = "📋 Copy"
+			CopyBtn.TextColor3 = Color3.fromRGB(180, 200, 255)
+			CopyBtn.Font = Enum.Font.GothamBold
+			CopyBtn.TextSize = 10
+			CopyBtn.Parent = ControlsHeader
+			Instance.new("UICorner", CopyBtn).CornerRadius = UDim.new(0, 4)
+
+			local ExpandBtn = Instance.new("TextButton")
+			ExpandBtn.Size = UDim2.new(0, 70, 0, 22)
+			ExpandBtn.Position = UDim2.new(1, -132, 0, 3)
+			ExpandBtn.BackgroundColor3 = Color3.fromRGB(35, 38, 50)
+			ExpandBtn.Text = "▲ Expand"
+			ExpandBtn.TextColor3 = Color3.fromRGB(200, 210, 240)
+			ExpandBtn.Font = Enum.Font.GothamBold
+			ExpandBtn.TextSize = 10
+			ExpandBtn.Parent = ControlsHeader
+			Instance.new("UICorner", ExpandBtn).CornerRadius = UDim.new(0, 4)
+
+			local InnerScroll = Instance.new("ScrollingFrame")
+			InnerScroll.Size = UDim2.new(1, -12, 1, -32)
+			InnerScroll.Position = UDim2.new(0, 6, 0, 30)
+			InnerScroll.BackgroundTransparency = 1
+			InnerScroll.BorderSizePixel = 0
+			InnerScroll.ScrollBarThickness = 4
+			InnerScroll.ScrollBarImageColor3 = Color3.fromRGB(80, 85, 105)
+			InnerScroll.Parent = CodeContainer
+
+			local CodeLabel = Instance.new("TextLabel")
+			CodeLabel.Size = UDim2.new(1, -6, 0, 0)
+			CodeLabel.Position = UDim2.new(0, 0, 0, 0)
+			CodeLabel.BackgroundTransparency = 1
+			CodeLabel.Text = seg.content
+			CodeLabel.TextColor3 = Color3.fromRGB(160, 225, 160)
+			CodeLabel.Font = Enum.Font.Code
+			CodeLabel.TextSize = 12
+			CodeLabel.TextWrapped = true
+			CodeLabel.TextXAlignment = Enum.TextXAlignment.Left
+			CodeLabel.TextYAlignment = Enum.TextYAlignment.Top
+			CodeLabel.Parent = InnerScroll
+
+			local isExpanded = false
+			local function updateCodeSize()
+				local neededHeight = CodeLabel.TextBounds.Y + 12
+				CodeLabel.Size = UDim2.new(1, -6, 0, neededHeight)
+				InnerScroll.CanvasSize = UDim2.new(0, 0, 0, neededHeight)
+			end
+
+			CodeLabel:GetPropertyChangedSignal("TextBounds"):Connect(updateCodeSize)
+			updateCodeSize()
+
+			ExpandBtn.MouseButton1Click:Connect(function()
+				isExpanded = not isExpanded
+				if isExpanded then
+					local targetH = math.clamp(CodeLabel.TextBounds.Y + 42, 120, 280)
+					TweenService:Create(CodeContainer, TweenInfo.new(0.2, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), {Size = UDim2.new(1, 0, 0, targetH)}):Play()
+					ExpandBtn.Text = "▼ Collapse"
+				else
+					TweenService:Create(CodeContainer, TweenInfo.new(0.2, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), {Size = UDim2.new(1, 0, 0, 30)}):Play()
+					ExpandBtn.Text = "▲ Expand"
+				end
+				task.delay(0.22, function()
+					local h = 0
+					for _, c in ipairs(Wrapper:GetChildren()) do if c:IsA("GuiObject") then h = h + c.Size.Y.Offset + 6 end end
+					Wrapper.Size = UDim2.new(1, -10, 0, h)
+				end)
+			end)
+
+			CopyBtn.MouseButton1Click:Connect(function()
+				copyToClipboard(seg.content)
+				CopyBtn.Text = "Copied!"
+				CopyBtn.TextColor3 = Color3.fromRGB(100, 255, 150)
+				task.delay(1.5, function()
+					CopyBtn.Text = "📋 Copy"
+					CopyBtn.TextColor3 = Color3.fromRGB(180, 200, 255)
+				end)
+			end)
+		end
+	end
+
+	if isError and retryPrompt then
+		local RetryBtn = Instance.new("TextButton")
+		RetryBtn.Size = UDim2.new(0, 80, 0, 24)
+		RetryBtn.BackgroundColor3 = Color3.fromRGB(50, 30, 35)
+		RetryBtn.Text = "🔄 Retry"
+		RetryBtn.TextColor3 = Color3.fromRGB(255, 160, 160)
+		RetryBtn.Font = Enum.Font.GothamBold
+		RetryBtn.TextSize = 11
+		RetryBtn.Parent = Wrapper
+		Instance.new("UICorner", RetryBtn).CornerRadius = UDim.new(0, 6)
+
+		local RetryStroke = Instance.new("UIStroke", RetryBtn)
+		RetryStroke.Color = Color3.fromRGB(120, 50, 60)
+		RetryStroke.Thickness = 1
+
+		RetryBtn.MouseButton1Click:Connect(function()
+			if isWaitingForAI then return end
+			Wrapper:Destroy()
+			handleSend(retryPrompt)
+		end)
+	end
+
+	local totalHeight = 0
+	for _, child in ipairs(Wrapper:GetChildren()) do
+		if child:IsA("GuiObject") then totalHeight = totalHeight + child.Size.Y.Offset + 6 end
+	end
+	Wrapper.Size = UDim2.new(1, -10, 0, totalHeight)
+	return Wrapper
+end
+
+local function clearChatDisplay()
+	for _, child in ipairs(ChatScroll:GetChildren()) do
+		if child:IsA("Frame") then child:Destroy() end
+	end
+end
+
+local function loadChatSession(sessId)
+	CurrentSessionId = sessId
+	clearChatDisplay()
+	if SavedSessions[sessId] and SavedSessions[sessId].history then
+		ConversationHistory = HttpService:JSONDecode(HttpService:JSONEncode(SavedSessions[sessId].history))
+		for _, item in ipairs(ConversationHistory) do
+			renderMessage((item.role == "user") and "You" or "ArtStudio AI", item.content)
+		end
+	else
+		ConversationHistory = {}
+		SavedSessions[sessId] = {title = "New Chat", history = ConversationHistory}
+	end
+end
+
+local function updateSidebarUI()
+	for _, child in ipairs(SidebarScroll:GetChildren()) do
+		if child:IsA("Frame") then child:Destroy() end
+	end
+
+	for sessId, sessData in pairs(SavedSessions) do
+		local SessItemFrame = Instance.new("Frame")
+		SessItemFrame.Size = UDim2.new(1, 0, 0, 32)
+		SessItemFrame.BackgroundTransparency = 1
+		SessItemFrame.ClipsDescendants = true
+		SessItemFrame.Parent = SidebarScroll
+
+		local SessBtn = Instance.new("TextButton")
+		SessBtn.Size = UDim2.new(1, 0, 0, 32)
+		SessBtn.BackgroundColor3 = (tostring(sessId) == tostring(CurrentSessionId)) and Color3.fromRGB(40, 45, 60) or Color3.fromRGB(30, 32, 40)
+		SessBtn.Text = "  💬 " .. (sessData.title or "Saved Chat")
+		SessBtn.TextColor3 = Color3.fromRGB(220, 225, 240)
+		SessBtn.Font = Enum.Font.Gotham
+		SessBtn.TextSize = 11
+		SessBtn.TextXAlignment = Enum.TextXAlignment.Left
+		SessBtn.Parent = SessItemFrame
+		Instance.new("UICorner", SessBtn).CornerRadius = UDim.new(0, 6)
+
+		local DeletePanel = Instance.new("Frame")
+		DeletePanel.Size = UDim2.new(1, 0, 0, 0)
+		DeletePanel.Position = UDim2.new(0, 0, 0, 34)
+		DeletePanel.BackgroundColor3 = Color3.fromRGB(50, 25, 30)
+		DeletePanel.BorderSizePixel = 0
+		DeletePanel.ClipsDescendants = true
+		DeletePanel.Visible = false
+		DeletePanel.Parent = SessItemFrame
+		Instance.new("UICorner", DeletePanel).CornerRadius = UDim.new(0, 6)
+
+		local DelBtn = Instance.new("TextButton")
+		DelBtn.Size = UDim2.new(1, 0, 1, 0)
+		DelBtn.BackgroundTransparency = 1
+		DelBtn.Text = "🗑 Delete Conversation"
+		DelBtn.TextColor3 = Color3.fromRGB(255, 120, 120)
+		DelBtn.Font = Enum.Font.GothamBold
+		DelBtn.TextSize = 11
+		DelBtn.TextTransparency = 1
+		DelBtn.Parent = DeletePanel
+
+		local pressThread = nil
+		local wasLongPressed = false
+
+		local function closeActivePanel()
+			if ActiveDeletePanel and ActiveDeletePanel.Parent then
+				local oldFrame = ActiveDeletePanel.Parent
+				local oldPanel = ActiveDeletePanel
+				local oldBtn = oldPanel:FindFirstChildOfClass("TextButton")
+
+				TweenService:Create(oldFrame, TweenInfo.new(0.25, Enum.EasingStyle.Quart, Enum.EasingDirection.Out), {Size = UDim2.new(1, 0, 0, 32)}):Play()
+				TweenService:Create(oldPanel, TweenInfo.new(0.25, Enum.EasingStyle.Quart, Enum.EasingDirection.Out), {Size = UDim2.new(1, 0, 0, 0)}):Play()
+				if oldBtn then
+					TweenService:Create(oldBtn, TweenInfo.new(0.15, Enum.EasingStyle.Quart, Enum.EasingDirection.Out), {TextTransparency = 1}):Play()
+				end
+				
+				task.delay(0.25, function()
+					oldPanel.Visible = false
+				end)
+				ActiveDeletePanel = nil
+			end
+		end
+
+		SessBtn.InputBegan:Connect(function(input)
+			if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
+				wasLongPressed = false
+				pressThread = task.delay(0.6, function()
+					wasLongPressed = true
+					if ActiveDeletePanel ~= DeletePanel then
+						closeActivePanel()
+						ActiveDeletePanel = DeletePanel
+						DeletePanel.Visible = true
+						
+						TweenService:Create(SessItemFrame, TweenInfo.new(0.25, Enum.EasingStyle.Quart, Enum.EasingDirection.Out), {Size = UDim2.new(1, 0, 0, 64)}):Play()
+						TweenService:Create(DeletePanel, TweenInfo.new(0.25, Enum.EasingStyle.Quart, Enum.EasingDirection.Out), {Size = UDim2.new(1, 0, 0, 28)}):Play()
+						TweenService:Create(DelBtn, TweenInfo.new(0.25, Enum.EasingStyle.Quart, Enum.EasingDirection.Out), {TextTransparency = 0}):Play()
+					end
+				end)
+			end
+		end)
+
+		SessBtn.InputEnded:Connect(function(input)
+			if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
+				if pressThread then task.cancel(pressThread) end
+			end
+		end)
+
+		SessBtn.MouseButton1Click:Connect(function()
+			if wasLongPressed then return end
+			closeActivePanel()
+			loadChatSession(sessId)
+			updateSidebarUI()
+			sidebarOpen = false
+			TweenService:Create(Sidebar, TweenInfo.new(0.25, Enum.EasingStyle.Quart, Enum.EasingDirection.Out), {Position = UDim2.new(-0.65, 0, 0, 50)}):Play()
+		end)
+
+		DelBtn.MouseButton1Click:Connect(function()
+			SavedSessions[sessId] = nil
+			saveCurrentData()
+			if tostring(sessId) == tostring(CurrentSessionId) then
+				local newId = os.time()
+				SavedSessions[newId] = {title = "New Chat", history = {}}
+				loadChatSession(newId)
+			end
+			updateSidebarUI()
+		end)
+	end
+end
+
+NewChatBtn.MouseButton1Click:Connect(function()
+	local newId = os.time()
+	SavedSessions[newId] = {title = "New Chat", history = {}}
+	loadChatSession(newId)
+	updateSidebarUI()
+end)
+
+local httpRequest = (http and http.request) or (syn and syn.request) or request or http_request
+
+local function fetchAIResponse(userPrompt)
+	table.insert(ConversationHistory, {role = "user", content = userPrompt})
+
+	local sendMessages = {}
+	for _, item in ipairs(ConversationHistory) do
+		table.insert(sendMessages, {
+			role = item.role,
+			content = item.content
+		})
+	end
+
+	local payload = HttpService:JSONEncode({
+		messages = sendMessages,
+		model = "openai"
+	})
+
+	if httpRequest then
+		for attempt = 1, 2 do
+			local response = httpRequest({
+				Url = POLLINATIONS_URL,
+				Method = "POST",
+				Headers = {["Content-Type"] = "application/json"},
+				Body = payload,
+				Timeout = 30
+			})
+			if response and response.Body then
+				local aiText = response.Body
+				if aiText and aiText ~= "" then
+					table.insert(ConversationHistory, {role = "assistant", content = aiText})
+					
+					local firstMsg = ConversationHistory[1] and ConversationHistory[1].content or "Chat"
+					SavedSessions[CurrentSessionId] = {
+						title = firstMsg:sub(1, 20) .. "...",
+						history = ConversationHistory
+					}
+					saveCurrentData()
+					updateSidebarUI()
+					return true, aiText
+				end
+			end
+			task.wait(1)
+		end
+	end
+	table.remove(ConversationHistory, #ConversationHistory)
+	return false, "Error: Could not resolve response from Pollinations AI. Please check network connection and retry."
+end
+
+handleSend = function(overrideText)
+	if isWaitingForAI then return end
+	local userPrompt = overrideText or TextBox.Text
+	local fullPayloadText = userPrompt
+
+	if StagedCodeText then
+		fullPayloadText = (userPrompt ~= "" and (userPrompt .. "\n\n") or "") .. "```lua\n" .. StagedCodeText .. "\n```"
+		StagedCodeText = nil
+		isPreviewExpanded = false
+		AttachCardToggle.Text = "▲ View"
+		updateInputFramePos()
+	end
+
+	if fullPayloadText == "" or fullPayloadText:match("^%s*$") then return end
+
+	setInputLock(true)
+	if not overrideText then 
+		TextBox.Text = ""
+		InputFrame.Size = UDim2.new(1, -16, 0, 44)
+		InputFrame.Position = UDim2.new(0, 8, 1, -52)
+		updateInputFramePos()
+	end
+
+	if not overrideText then renderMessage("You", fullPayloadText) end
+	local loadingWrapper = renderMessage("ArtStudio AI", "Thinking .")
+
+	local thinkingThread = task.spawn(function()
+		local count = 1
+		local label = loadingWrapper:FindFirstChildOfClass("TextLabel")
+		while isWaitingForAI do
+			task.wait(0.4)
+			count = (count % 3) + 1
+			if label and label.Parent then
+				label.Text = "<b>ArtStudio AI:</b> Thinking" .. string.rep(".", count)
+			end
+		end
+	end)
+
+	task.spawn(function()
+		local success, responseText = fetchAIResponse(fullPayloadText)
+		isWaitingForAI = false
+		loadingWrapper:Destroy()
+		if success then
+			renderMessage("ArtStudio AI", responseText)
+		else
+			renderMessage("ArtStudio AI", responseText, true, fullPayloadText)
+		end
+		setInputLock(false)
+	end)
+end
+
+SendBtn.MouseButton1Click:Connect(function() handleSend() end)
+
+loadChatSession(CurrentSessionId)
+updateSidebarUI()
+
+-- Trigger Tutorial window on initial start ONLY if never seen before
+if not SettingsData.HasSeenTutorial then
+	openTutorialWithCooldown()
+end
