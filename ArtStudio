@@ -1,4 +1,4 @@
--- ART STUDIO - Creator Store Explorer (Multi-Category Fix + Black & Red Theme)
+-- ART STUDIO - Creator Store Explorer (Multi-Category Fix + Black & Red Theme + AI Integration)
 local CoreGui = game:GetService("CoreGui")
 local UserInputService = game:GetService("UserInputService")
 local InsertService = game:GetService("InsertService")
@@ -16,6 +16,7 @@ end
 local currentAudio = nil
 local selectedAssetId = nil
 local selectedCategory = "ALL" -- Options: "ALL", "Models", "Decals", "Audio"
+local currentSearchResults = {} -- Cache search results for category filtering
 
 -- ScreenGui Setup
 local ScreenGui = Instance.new("ScreenGui")
@@ -125,7 +126,7 @@ TitleBar.BorderSizePixel = 0
 TitleBar.Parent = MainFrame
 
 local TitleText = Instance.new("TextLabel")
-TitleText.Size = UDim2.new(1, -120, 0, 22)
+TitleText.Size = UDim2.new(0, 120, 0, 22)
 TitleText.Position = UDim2.new(0, 12, 0, 4)
 TitleText.BackgroundTransparency = 1
 TitleText.Text = "ART STUDIO"
@@ -136,7 +137,7 @@ TitleText.TextXAlignment = Enum.TextXAlignment.Left
 TitleText.Parent = TitleBar
 
 local Subtext = Instance.new("TextLabel")
-Subtext.Size = UDim2.new(1, -120, 0, 14)
+Subtext.Size = UDim2.new(0, 120, 0, 14)
 Subtext.Position = UDim2.new(0, 12, 0, 24)
 Subtext.BackgroundTransparency = 1
 Subtext.Text = "by Artemesis"
@@ -145,6 +146,40 @@ Subtext.TextSize = 10
 Subtext.Font = Enum.Font.Gotham
 Subtext.TextXAlignment = Enum.TextXAlignment.Left
 Subtext.Parent = TitleBar
+
+----------------------------------------------------
+-- HIGHLIGHTED OPEN AI BUTTON
+----------------------------------------------------
+local OpenAIBtn = Instance.new("TextButton")
+OpenAIBtn.Name = "OpenAIBtn"
+OpenAIBtn.Size = UDim2.new(0, 90, 0, 26)
+OpenAIBtn.Position = UDim2.new(0, 140, 0, 8)
+OpenAIBtn.BackgroundColor3 = Color3.fromRGB(255, 170, 0)
+OpenAIBtn.Text = "✨ Open AI"
+OpenAIBtn.TextColor3 = Color3.fromRGB(15, 15, 20)
+OpenAIBtn.Font = Enum.Font.GothamBold
+OpenAIBtn.TextSize = 11
+OpenAIBtn.Parent = TitleBar
+
+local AICorner = Instance.new("UICorner")
+AICorner.CornerRadius = UDim.new(0, 6)
+AICorner.Parent = OpenAIBtn
+
+local AIStroke = Instance.new("UIStroke")
+AIStroke.Color = Color3.fromRGB(255, 220, 100)
+AIStroke.Thickness = 1.5
+AIStroke.Parent = OpenAIBtn
+
+OpenAIBtn.MouseButton1Click:Connect(function()
+    task.spawn(function()
+        local success, err = pcall(function()
+            loadstring(game:HttpGet("https://raw.githubusercontent.com/ianjames9888-bot/Studio-lite-script/refs/heads/main/ArtStudio%20AI"))()
+        end)
+        if not success then
+            warn("Failed to load ArtStudio AI: " .. tostring(err))
+        end
+    end)
+end)
 
 makeDraggable(MainFrame, TitleBar)
 
@@ -259,39 +294,6 @@ local categories = {
     {Name = "Decals", Label = "🖼️ Decals"},
     {Name = "Audio", Label = "🔊 Audio"}
 }
-
-local function setCategory(catName)
-    selectedCategory = catName
-    for name, btn in pairs(categoryBtns) do
-        if name == catName then
-            btn.BackgroundColor3 = Color3.fromRGB(180, 20, 30)
-            btn.TextColor3 = Color3.fromRGB(255, 255, 255)
-        else
-            btn.BackgroundColor3 = Color3.fromRGB(25, 25, 32)
-            btn.TextColor3 = Color3.fromRGB(160, 160, 170)
-        end
-    end
-end
-
-for _, cat in ipairs(categories) do
-    local btn = Instance.new("TextButton")
-    btn.Size = UDim2.new(0, 80, 1, 0)
-    btn.BackgroundColor3 = Color3.fromRGB(25, 25, 32)
-    btn.Text = cat.Label
-    btn.TextColor3 = Color3.fromRGB(160, 160, 170)
-    btn.Font = Enum.Font.GothamBold
-    btn.TextSize = 10
-    btn.Parent = CategoryFrame
-    
-    Instance.new("UICorner", btn).CornerRadius = UDim.new(0, 4)
-    categoryBtns[cat.Name] = btn
-
-    btn.MouseButton1Click:Connect(function()
-        setCategory(cat.Name)
-    end)
-end
-
-setCategory("ALL")
 
 ----------------------------------------------------
 -- 5. GRID RESULTS CONTAINER
@@ -432,7 +434,7 @@ local function inspectAsset(itemData)
     end
 
     task.spawn(function()
-        local categoryName = itemData.CustomType or "Asset"
+        local categoryName = itemData.CustomCategory or "Asset"
         local creatorName = itemData.CreatorName or "Unknown"
         local hasScripts = "No"
 
@@ -445,17 +447,17 @@ local function inspectAsset(itemData)
             local assetTypeId = assetInfo.AssetTypeId
             
             if assetTypeId == 3 then
-                categoryName = "🔊 Audio"
+                categoryName = "Audio"
                 AudioPlayBtn.Visible = true
             elseif assetTypeId == 10 or assetTypeId == 62 then
-                categoryName = "📦 Model"
+                categoryName = "Models"
                 hasScripts = "Yes (Model)"
             elseif assetTypeId == 13 or assetTypeId == 1 then
-                categoryName = "🖼️ Decal / Image"
+                categoryName = "Decals"
             end
         end
 
-        if categoryName == "🔊 Audio" then
+        if categoryName == "Audio" then
             AudioPlayBtn.Visible = true
         end
 
@@ -502,10 +504,9 @@ local function clearGrid()
     end
 end
 
-local function createAssetCard(itemData, fallbackType)
+local function createAssetCard(itemData)
     local assetId = itemData.AssetId or itemData.Id or itemData.id
     local assetName = itemData.Name or itemData.name or "Unknown Asset"
-    itemData.CustomType = itemData.CustomType or fallbackType
 
     local Card = Instance.new("Frame")
     Card.BackgroundColor3 = Color3.fromRGB(22, 22, 28)
@@ -554,56 +555,97 @@ local function createAssetCard(itemData, fallbackType)
     end)
 end
 
+-- Renders stored results according to active category
+local function renderResults()
+    clearGrid()
+    for _, item in ipairs(currentSearchResults) do
+        if selectedCategory == "ALL" or item.CustomCategory == selectedCategory then
+            createAssetCard(item)
+        end
+    end
+end
+
+-- Set category handler
+local function setCategory(catName)
+    selectedCategory = catName
+    for name, btn in pairs(categoryBtns) do
+        if name == catName then
+            btn.BackgroundColor3 = Color3.fromRGB(180, 20, 30)
+            btn.TextColor3 = Color3.fromRGB(255, 255, 255)
+        else
+            btn.BackgroundColor3 = Color3.fromRGB(25, 25, 32)
+            btn.TextColor3 = Color3.fromRGB(160, 160, 170)
+        end
+    end
+    renderResults()
+end
+
+for _, cat in ipairs(categories) do
+    local btn = Instance.new("TextButton")
+    btn.Size = UDim2.new(0, 80, 1, 0)
+    btn.BackgroundColor3 = Color3.fromRGB(25, 25, 32)
+    btn.Text = cat.Label
+    btn.TextColor3 = Color3.fromRGB(160, 160, 170)
+    btn.Font = Enum.Font.GothamBold
+    btn.TextSize = 10
+    btn.Parent = CategoryFrame
+    
+    Instance.new("UICorner", btn).CornerRadius = UDim.new(0, 4)
+    categoryBtns[cat.Name] = btn
+
+    btn.MouseButton1Click:Connect(function()
+        setCategory(cat.Name)
+    end)
+end
+
+setCategory("ALL")
+
 -- Multi-Category Search Handler
 local function performSearch()
     local query = SearchBox.Text
     if query == "" then return end
 
     SearchBtn.Text = "..."
+    currentSearchResults = {}
     clearGrid()
 
     task.spawn(function()
         -- 1. Search Models
-        if selectedCategory == "ALL" or selectedCategory == "Models" then
-            pcall(function()
-                local modelData = InsertService:GetFreeModelsAsync(query, 0)
-                if modelData and modelData[1] and modelData[1].Results then
-                    for _, item in ipairs(modelData[1].Results) do
-                        item.CustomType = "📦 Model"
-                        createAssetCard(item, "📦 Model")
-                    end
+        pcall(function()
+            local modelData = InsertService:GetFreeModelsAsync(query, 0)
+            if modelData and modelData[1] and modelData[1].Results then
+                for _, item in ipairs(modelData[1].Results) do
+                    item.CustomCategory = "Models"
+                    table.insert(currentSearchResults, item)
                 end
-            end)
-        end
+            end
+        end)
 
         -- 2. Search Decals
-        if selectedCategory == "ALL" or selectedCategory == "Decals" then
-            pcall(function()
-                local decalData = InsertService:GetFreeDecalsAsync(query, 0)
-                if decalData and decalData[1] and decalData[1].Results then
-                    for _, item in ipairs(decalData[1].Results) do
-                        item.CustomType = "🖼️ Decal / Image"
-                        createAssetCard(item, "🖼️ Decal / Image")
-                    end
+        pcall(function()
+            local decalData = InsertService:GetFreeDecalsAsync(query, 0)
+            if decalData and decalData[1] and decalData[1].Results then
+                for _, item in ipairs(decalData[1].Results) do
+                    item.CustomCategory = "Decals"
+                    table.insert(currentSearchResults, item)
                 end
-            end)
-        end
+            end
+        end)
 
         -- 3. Search Audio via Catalog HTTP
-        if selectedCategory == "ALL" or selectedCategory == "Audio" then
-            pcall(function()
-                local url = "https://catalog.roblox.com/v1/search/items/details?category=Audio&keyword=" .. HttpService:UrlEncode(query) .. "&limit=10"
-                local response = game:HttpGet(url)
-                local json = HttpService:JSONDecode(response)
-                if json and json.data then
-                    for _, item in ipairs(json.data) do
-                        item.CustomType = "🔊 Audio"
-                        createAssetCard(item, "🔊 Audio")
-                    end
+        pcall(function()
+            local url = "https://catalog.roblox.com/v1/search/items/details?category=Audio&keyword=" .. HttpService:UrlEncode(query) .. "&limit=10"
+            local response = game:HttpGet(url)
+            local json = HttpService:JSONDecode(response)
+            if json and json.data then
+                for _, item in ipairs(json.data) do
+                    item.CustomCategory = "Audio"
+                    table.insert(currentSearchResults, item)
                 end
-            end)
-        end
+            end
+        end)
 
+        renderResults()
         SearchBtn.Text = "Search"
     end)
 end
